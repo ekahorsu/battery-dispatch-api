@@ -1,0 +1,38 @@
+{
+  "prices": [
+    24.3,
+    21.41,
+    20.45,
+    19.29,
+    21.57,
+    20.75,
+    26.78,
+    28.72,
+    26.41,
+    25.56,
+    29.74,
+    32.56,
+    22.77,
+    25.86,
+    25.57,
+    35.48,
+    29.19,
+    29.33,
+    28.12,
+    27.13,
+    25.94,
+    30.65,
+    31.3,
+    24.16
+  ],
+  "interval_hours": 1.0,
+  "battery": {
+    "energy_capacity_mwh": 20,
+    "power_rating_mw": 5,
+    "charge_efficiency": 0.95,
+    "discharge_efficiency": 0.95,
+    "initial_soc_mwh": 0,
+    "final_soc_min_mwh": 0,
+    "degradation_cost_per_mwh": 2.0
+  }
+}
