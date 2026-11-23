@@ -1,0 +1,69 @@
+name: ci-cd
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  SERVICE: battery-dispatch-api
+  REGION: us-west1
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Run tests
+        run: pytest -v
+      - name: Build Docker image
+        run: docker build -t $SERVICE .
+      - name: Smoke-test the container
+        run: |
+          docker run -d -p 8080:8080 --name api $SERVICE
+          for i in $(seq 1 20); do curl -sf localhost:8080/health && break; sleep 1; done
+          curl -sf -X POST localhost:8080/dispatch/compare -H "Content-Type: application/json" -d @examples/sample_request.json
+
+  deploy:
+    # Deploy only from main, after the tests pass, and only once the GCP secrets are set
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check that deployment is configured
+        id: check
+        run: |
+          if [ -z "${{ secrets.GCP_SA_KEY }}" ] || [ -z "${{ secrets.GCP_PROJECT_ID }}" ]; then
+            echo "GCP secrets not set; skipping deployment."; echo "ready=false" >> $GITHUB_OUTPUT
+          else
+            echo "ready=true" >> $GITHUB_OUTPUT
+          fi
+      - uses: google-github-actions/auth@v2
+        if: steps.check.outputs.ready == 'true'
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - uses: google-github-actions/setup-gcloud@v2
+        if: steps.check.outputs.ready == 'true'
+      - name: Deploy to Cloud Run
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          gcloud run deploy $SERVICE \
+            --source . \
+            --project ${{ secrets.GCP_PROJECT_ID }} \
+            --region $REGION \
+            --allow-unauthenticated \
+            --max-instances 2 \
+            --memory 512Mi \
+            --quiet
+      - name: Check the live service
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          URL=$(gcloud run services describe $SERVICE --project ${{ secrets.GCP_PROJECT_ID }} --region $REGION --format 'value(status.url)')
+          echo "Service URL: $URL"
+          curl -sf "$URL/health"
