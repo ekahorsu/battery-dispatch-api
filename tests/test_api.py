@@ -9,6 +9,11 @@ client = TestClient(app)
 SAMPLE = json.load(open(os.path.join(os.path.dirname(__file__), "..", "examples", "sample_request.json")))
 
 
+def test_root_redirects_to_docs():
+    r = client.get("/", follow_redirects=False)
+    assert r.status_code == 307 and r.headers["location"] == "/docs"
+
+
 def test_health():
     r = client.get("/health")
     assert r.status_code == 200 and r.json()["status"] == "ok"

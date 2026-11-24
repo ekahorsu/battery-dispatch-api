@@ -4,6 +4,7 @@ Run locally:  uvicorn app.main:app --reload
 Interactive documentation is served at /docs.
 """
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import RedirectResponse
 
 from . import __version__
 from .optimizer import Battery, optimize_dispatch, rule_based_dispatch
@@ -32,6 +33,11 @@ def _response(method, req, sched) -> DispatchResponse:
                          discharge_mw=round(float(d), 3), soc_mwh=round(float(s), 3))
                   for t, (c, d, s) in enumerate(zip(sched.charge_mw, sched.discharge_mw, sched.soc_mwh))],
     )
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    return RedirectResponse(url="/docs")
 
 
 @app.get("/health")
