@@ -8,6 +8,9 @@ on:
 env:
   SERVICE: battery-dispatch-api
   REGION: us-west1
+  PROJECT_ID: project-4812e5c4-3a75-4314-8c3
+  WIF_PROVIDER: projects/209645576722/locations/global/workloadIdentityPools/github/providers/github-provider
+  DEPLOY_SA: github-deployer@project-4812e5c4-3a75-4314-8c3.iam.gserviceaccount.com
 
 jobs:
   test:
@@ -30,40 +33,33 @@ jobs:
           curl -sf -X POST localhost:8080/dispatch/compare -H "Content-Type: application/json" -d @examples/sample_request.json
 
   deploy:
-    # Deploy only from main, after the tests pass, and only once the GCP secrets are set
+    # Deploy only from main, after the tests pass. GitHub signs in to Google Cloud with
+    # Workload Identity Federation (short-lived OIDC tokens), so no service account key is stored.
     needs: test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
-      - name: Check that deployment is configured
-        id: check
-        run: |
-          if [ -z "${{ secrets.GCP_SA_KEY }}" ] || [ -z "${{ secrets.GCP_PROJECT_ID }}" ]; then
-            echo "GCP secrets not set; skipping deployment."; echo "ready=false" >> $GITHUB_OUTPUT
-          else
-            echo "ready=true" >> $GITHUB_OUTPUT
-          fi
       - uses: google-github-actions/auth@v2
-        if: steps.check.outputs.ready == 'true'
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SA }}
       - uses: google-github-actions/setup-gcloud@v2
-        if: steps.check.outputs.ready == 'true'
       - name: Deploy to Cloud Run
-        if: steps.check.outputs.ready == 'true'
         run: |
           gcloud run deploy $SERVICE \
             --source . \
-            --project ${{ secrets.GCP_PROJECT_ID }} \
+            --project $PROJECT_ID \
             --region $REGION \
             --allow-unauthenticated \
             --max-instances 2 \
             --memory 512Mi \
             --quiet
       - name: Check the live service
-        if: steps.check.outputs.ready == 'true'
         run: |
-          URL=$(gcloud run services describe $SERVICE --project ${{ secrets.GCP_PROJECT_ID }} --region $REGION --format 'value(status.url)')
+          URL=$(gcloud run services describe $SERVICE --project $PROJECT_ID --region $REGION --format 'value(status.url)')
           echo "Service URL: $URL"
           curl -sf "$URL/health"
