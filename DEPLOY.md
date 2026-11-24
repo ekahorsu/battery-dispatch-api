@@ -43,25 +43,41 @@ curl -X POST $URL/dispatch/compare -H "Content-Type: application/json" -d @examp
 
 ## 3. Automatic deployment from GitHub (about 10 minutes)
 
-Create a service account that GitHub Actions uses to deploy, with only the permissions a source deployment needs:
+GitHub Actions signs in to Google Cloud with **Workload Identity Federation**: GitHub issues a short-lived OIDC token for each run, and Google exchanges it for temporary credentials. No service account key is created or stored, and only this repository is trusted.
+
+In Cloud Shell:
 
 ```bash
+PROJECT_ID=$(gcloud config get-value project)
+PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')
+REPO=ekahorsu/battery-dispatch-api
+
+# Service account that deploys, with only the permissions a source deployment needs
 gcloud iam service-accounts create github-deployer --display-name "GitHub Actions deployer"
 SA=github-deployer@$PROJECT_ID.iam.gserviceaccount.com
 for ROLE in roles/run.admin roles/iam.serviceAccountUser roles/cloudbuild.builds.editor \
             roles/artifactregistry.writer roles/storage.admin roles/serviceusage.serviceUsageConsumer; do
   gcloud projects add-iam-policy-binding $PROJECT_ID --member=serviceAccount:$SA --role=$ROLE --condition=None --quiet > /dev/null
 done
-gcloud iam service-accounts keys create key.json --iam-account=$SA
-cat key.json
+
+# Trust GitHub's identity tokens, limited to this repository
+gcloud services enable iamcredentials.googleapis.com sts.googleapis.com
+gcloud iam workload-identity-pools create github --location=global --display-name="GitHub Actions"
+gcloud iam workload-identity-pools providers create-oidc github-provider \
+  --location=global --workload-identity-pool=github --display-name="GitHub provider" \
+  --issuer-uri="https://token.actions.githubusercontent.com" \
+  --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository" \
+  --attribute-condition="assertion.repository=='$REPO'"
+
+# Let workflows from this repository act as the deployer service account
+gcloud iam service-accounts add-iam-policy-binding $SA --role=roles/iam.workloadIdentityUser \
+  --member="principalSet://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/attribute.repository/$REPO"
+
+echo "WIF_PROVIDER: projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/providers/github-provider"
+echo "DEPLOY_SA:    $SA"
 ```
 
-Then, in the GitHub repository: **Settings > Secrets and variables > Actions > New repository secret**:
-
-- `GCP_SA_KEY`: paste the full contents of `key.json`
-- `GCP_PROJECT_ID`: your project ID
-
-Delete the key file from Cloud Shell afterwards: `rm key.json`. The key is a password; never commit it to the repository.
+Put the two printed values and your project ID in the `env` section at the top of `.github/workflows/ci-cd.yml`. They are identifiers, not secrets, so no GitHub secrets are needed.
 
 Now every push to `main` runs the tests, builds and smoke-tests the container, and deploys the new version to Cloud Run. Check progress in the repository's **Actions** tab.
 
@@ -74,5 +90,5 @@ Now every push to `main` runs the tests, builds and smoke-tests the container, a
 ## Troubleshooting
 
 - **Build fails with a permission error:** rerun the `roles/run.builder` command in step 2 and wait a minute for the permission to apply.
-- **`keys create` is blocked by an organization policy:** this applies to work or school Google accounts. Use a personal Google account for the project, or set up Workload Identity Federation instead of a key.
-- **GitHub deploy job skipped:** the two secrets are missing or misnamed; the test job still runs.
+- **Deploy job fails at "auth" with a permission or audience error:** check that the repository name in the provider condition and in the `workloadIdentityUser` binding exactly matches `owner/repository`, and that the workflow has `id-token: write` permission.
+- **Deploy job fails with "Permission denied" during the build:** wait a few minutes after granting roles, then re-run the job from the Actions tab.

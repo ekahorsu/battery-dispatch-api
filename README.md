@@ -4,7 +4,7 @@
 
 A cloud-deployed REST API that computes the profit-maximizing charge and discharge schedule of a grid battery from electricity prices. It solves a linear program for energy arbitrage, compares the result with a rule-based baseline, and runs as a Docker container on Google Cloud Run with automated testing and deployment through GitHub Actions.
 
-**Live service:** `https://<your-cloud-run-url>/docs` (interactive documentation, add the URL after deploying)
+**Live service:** https://battery-dispatch-api-209645576722.us-west1.run.app/docs (interactive documentation)
 
 ## Overview
 
@@ -52,7 +52,7 @@ The optimal schedule earns **85% more** than the rule-based baseline and comes o
 Example request (`examples/sample_request.json`, one day of prices):
 
 ```bash
-curl -X POST https://<your-cloud-run-url>/dispatch/compare \
+curl -X POST https://battery-dispatch-api-209645576722.us-west1.run.app/dispatch/compare \
   -H "Content-Type: application/json" \
   -d @examples/sample_request.json
 ```
@@ -78,9 +78,9 @@ Inputs are validated: prices must contain at least two values, battery ratings m
 ## Engineering
 
 - **Python package** with the optimization core (`app/optimizer.py`) separated from the API layer (`app/main.py`) and the request and response schemas (`app/schemas.py`, Pydantic).
-- **Unit and API tests** (pytest, 14 tests): known optimal solutions, efficiency losses, cycling cost, power and energy limits, energy balance on random prices, the optimal schedule never losing to the baseline, and input validation.
+- **Unit and API tests** (pytest, 15 tests): known optimal solutions, efficiency losses, cycling cost, power and energy limits, energy balance on random prices, the optimal schedule never losing to the baseline, and input validation.
 - **Docker** image based on `python:3.12-slim`, running as a non-root user.
-- **CI/CD with GitHub Actions** (`.github/workflows/ci-cd.yml`): every push and pull request runs the tests, builds the Docker image and smoke-tests the running container; every push to `main` that passes is deployed automatically to **Google Cloud Run** and checked with a live health request.
+- **CI/CD with GitHub Actions** (`.github/workflows/ci-cd.yml`): every push and pull request runs the tests, builds the Docker image and smoke-tests the running container; every push to `main` that passes is deployed automatically to **Google Cloud Run** and checked with a live health request. GitHub signs in to Google Cloud through **Workload Identity Federation** (short-lived OIDC tokens), so no service account key is stored anywhere.
 
 ```
 GitHub push ──► GitHub Actions: pytest ─► docker build ─► container smoke test
